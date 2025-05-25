@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const fs = require('fs').promises;
 const app = express();
 const dataFile = 'users.json';
@@ -28,9 +28,16 @@ async function readData() {
   return JSON.parse(data);
 }
 
-// Запись данных
+// Запись данных с резервным копированием
 async function writeData(data) {
   console.log('Writing data:', data);
+  try {
+    // Создаём резервную копию перед записью
+    await fs.copyFile(dataFile, 'users_backup.json');
+    console.log('Backup created: users_backup.json');
+  } catch (error) {
+    console.error('Error creating backup:', error);
+  }
   await fs.writeFile(dataFile, JSON.stringify(data, null, 2));
 }
 
@@ -48,7 +55,6 @@ setInterval(async () => {
       user.points = (user.points || 0) + (timeDiff * 0.0001); // 0.0001 балла в секунду
       user.lastUpdate = now;
 
-      // Реферальная система: 0.01% от доходности рефералов
       if (user.referrals) {
         for (const referralId of user.referrals) {
           if (data.users[referralId]) {
@@ -71,12 +77,18 @@ app.get('/user/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
 
+  const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
+  if (existingUser && existingUser !== userId) {
+    res.status(400).json({ error: 'This Telegram ID is already registered' });
+    return;
+  }
+
   if (!data.users[userId]) {
-    data.users[userId] = { points: 0, lastUpdate: Date.now(), referrals: [] };
+    const username = req.query.username || 'Anonymous';
+    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [] };
     await writeData(data);
   }
 
-  console.log(`Returning data for user ${userId}:`, data.users[userId]);
   res.json(data.users[userId]);
 });
 
@@ -84,7 +96,7 @@ app.get('/user/:userId', async (req, res) => {
 app.get('/leaderboard', async (req, res) => {
   const data = await readData();
   const leaderboard = Object.entries(data.users)
-    .map(([userId, user]) => ({ userId, points: user.points }))
+    .map(([userId, user]) => ({ username: user.username || userId, points: user.points }))
     .sort((a, b) => b.points - a.points)
     .slice(0, 10);
   res.json(leaderboard);
@@ -98,31 +110,43 @@ app.get('/referrals/:userId', async (req, res) => {
   const referralsData = await Promise.all(
     user.referrals.map(async (referralId) => {
       const referral = data.users[referralId] || { points: 0 };
-      return { referralId, points: referral.points };
+      const referralEarnings = (referral.points || 0) * 0.0001; // 0.01%
+      return { referralId, points: referral.points, earnings: referralEarnings };
     })
   );
   res.json({ referrals: referralsData });
 });
 
-// Эндпоинт для активации реферала
-app.get('/refer/:referralCode', async (req, res) => {
+// Эндпоинт для активации реферала через start
+app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
+  const userId = req.query.userId || Date.now().toString();
+  const username = req.query.username || 'Anonymous';
   const data = await readData();
 
-  // Простая генерация userId (можно улучшить)
-  const userId = Date.now().toString();
-  if (!data.users[userId]) {
-    data.users[userId] = { points: 0, lastUpdate: Date.now(), referrals: [] };
+  const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
+  if (existingUser) {
+    res.status(400).json({ error: 'This Telegram ID is already registered' });
+    return;
   }
 
-  // Добавляем реферала к спонсору
+  if (!data.users[userId]) {
+    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [] };
+  }
+
   if (data.users[referralCode]) {
     data.users[referralCode].referrals.push(userId);
     data.users[userId].referredBy = referralCode;
   }
 
   await writeData(data);
-  res.json({ userId, message: 'Referral activated' });
+  res.json({ userId, message: 'Referral activated via start' });
+});
+
+// Временный эндпоинт для сброса данных (для тестирования)
+app.get('/reset-users', async (req, res) => {
+  await fs.writeFile(dataFile, '{"users": {}}', 'utf8');
+  res.json({ message: 'users.json reset' });
 });
 
 // Запуск сервера
