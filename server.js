@@ -1,12 +1,7 @@
 const express = require('express');
 const fs = require('fs').promises;
-const axios = require('axios');
 const app = express();
 const dataFile = 'users.json';
-
-// Токен вашего бота
-const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA';
-const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 // Middleware для CORS
 app.use((req, res, next) => {
@@ -126,11 +121,13 @@ app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
   const userId = req.query.userId || Date.now().toString();
   const username = req.query.username || 'Anonymous';
-  const chatId = userId;
   const data = await readData();
+
+  console.log(`Received /start request: referralCode=${referralCode}, userId=${userId}, username=${username}`);
 
   const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
   if (existingUser) {
+    console.log(`User ${userId} already registered`);
     res.status(400).json({ error: 'This Telegram ID is already registered' });
     return;
   }
@@ -142,31 +139,10 @@ app.get('/start/:referralCode', async (req, res) => {
   if (data.users[referralCode]) {
     data.users[referralCode].referrals.push(userId);
     data.users[userId].referredBy = referralCode;
+    console.log(`Added referral: ${userId} to ${referralCode}`);
   }
 
   await writeData(data);
-
-  // Отправляем сообщение с inline-кнопкой через Telegram API
-  try {
-    const webAppUrl = `https://sokzaq.github.io/telegram-bot-frontend/?start=${referralCode}`;
-    await axios.post(`${TELEGRAM_API}/sendMessage`, {
-      chat_id: chatId,
-      text: 'Добро пожаловать в AFK2earn_bot! Нажмите ниже, чтобы открыть приложение и начать зарабатывать.',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: 'Open',
-              web_app: { url: webAppUrl }
-            }
-          ]
-        ]
-      }
-    });
-    console.log(`Sent inline button to user ${userId}`);
-  } catch (error) {
-    console.error('Error sending Telegram message:', error);
-  }
 
   res.json({ userId, message: 'Referral activated via start' });
 });
