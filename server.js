@@ -1,7 +1,12 @@
 const express = require('express');
 const fs = require('fs').promises;
+const axios = require('axios'); // Добавляем axios для запросов к Telegram API
 const app = express();
 const dataFile = 'users.json';
+
+// Токен вашего бота (замените на ваш)
+const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA'; // Замените на ваш токен
+const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 // Middleware для CORS
 app.use((req, res, next) => {
@@ -24,7 +29,7 @@ async function initializeDataFile() {
 // Чтение данных
 async function readData() {
   const data = await fs.readFile(dataFile, 'utf8');
-  console.log('Raw data from file:', data); // Отладка
+  console.log('Raw data from file:', data);
   return JSON.parse(data);
 }
 
@@ -32,7 +37,6 @@ async function readData() {
 async function writeData(data) {
   console.log('Writing data:', data);
   try {
-    // Создаём резервную копию перед записью
     await fs.copyFile(dataFile, 'users_backup.json');
     console.log('Backup created: users_backup.json');
   } catch (error) {
@@ -52,13 +56,13 @@ setInterval(async () => {
       const user = data.users[userId];
       const lastUpdate = user.lastUpdate || now;
       const timeDiff = (now - lastUpdate) / 1000;
-      user.points = (user.points || 0) + (timeDiff * 0.0001); // 0.0001 балла в секунду
+      user.points = (user.points || 0) + (timeDiff * 0.0001);
       user.lastUpdate = now;
 
       if (user.referrals) {
         for (const referralId of user.referrals) {
           if (data.users[referralId]) {
-            const referralEarnings = (data.users[referralId].points || 0) * 0.0001; // 0.01%
+            const referralEarnings = (data.users[referralId].points || 0) * 0.0001;
             user.points += referralEarnings;
             console.log(`Added ${referralEarnings} to ${userId} from referral ${referralId}`);
           }
@@ -110,7 +114,7 @@ app.get('/referrals/:userId', async (req, res) => {
   const referralsData = await Promise.all(
     user.referrals.map(async (referralId) => {
       const referral = data.users[referralId] || { points: 0 };
-      const referralEarnings = (referral.points || 0) * 0.0001; // 0.01%
+      const referralEarnings = (referral.points || 0) * 0.0001;
       return { referralId, points: referral.points, earnings: referralEarnings };
     })
   );
@@ -122,6 +126,7 @@ app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
   const userId = req.query.userId || Date.now().toString();
   const username = req.query.username || 'Anonymous';
+  const chatId = userId; // Предполагаем, что userId совпадает с chatId
   const data = await readData();
 
   const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
@@ -140,6 +145,29 @@ app.get('/start/:referralCode', async (req, res) => {
   }
 
   await writeData(data);
+
+  // Отправляем сообщение с inline-кнопкой через Telegram API
+  try {
+    const webAppUrl = `https://sokzaq.github.io/telegram-bot-frontend/?start=${referralCode}`;
+    await axios.post(`${TELEGRAM_API}/sendMessage`, {
+      chat_id: chatId,
+      text: 'Добро пожаловать в AFK2earn_bot! Нажмите ниже, чтобы открыть приложение и начать зарабатывать.',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Open',
+              web_app: { url: webAppUrl }
+            }
+          ]
+        ]
+      }
+    });
+    console.log(`Sent inline button to user ${userId}`);
+  } catch (error) {
+    console.error('Error sending Telegram message:', error);
+  }
+
   res.json({ userId, message: 'Referral activated via start' });
 });
 
