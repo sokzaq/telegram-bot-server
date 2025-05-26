@@ -1,11 +1,12 @@
-﻿{
-       "name": "telegram-bot-server",
-       "version": "0.0.1",
-       "main": "server.js",
-       "scripts": {
-         "start": "node server.js"
-       },
-       "dependencies": {
-         "express": "^4.17.1"
-       }
-     }
+{
+  "name": "telegram-bot-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "axios": "^1.6.8"
+  }
+}
