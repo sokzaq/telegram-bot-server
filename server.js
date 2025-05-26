@@ -24,16 +24,13 @@ async function initializeDataFile() {
 // Чтение данных
 async function readData() {
   const data = await fs.readFile(dataFile, 'utf8');
-  console.log('Raw data from file:', data);
   return JSON.parse(data);
 }
 
 // Запись данных с резервным копированием
 async function writeData(data) {
-  console.log('Writing data:', data);
   try {
     await fs.copyFile(dataFile, 'users_backup.json');
-    console.log('Backup created: users_backup.json');
   } catch (error) {
     console.error('Error creating backup:', error);
   }
@@ -45,7 +42,6 @@ setInterval(async () => {
   try {
     const data = await readData();
     const now = Date.now();
-
     console.log('Updating points at:', new Date(now).toISOString());
     for (const userId in data.users) {
       const user = data.users[userId];
@@ -53,7 +49,6 @@ setInterval(async () => {
       const timeDiff = (now - lastUpdate) / 1000;
       user.points = (user.points || 0) + (timeDiff * 0.0001);
       user.lastUpdate = now;
-
       if (user.referrals) {
         for (const referralId of user.referrals) {
           if (data.users[referralId]) {
@@ -64,7 +59,6 @@ setInterval(async () => {
         }
       }
     }
-
     await writeData(data);
   } catch (error) {
     console.error('Error updating points:', error);
@@ -75,19 +69,16 @@ setInterval(async () => {
 app.get('/user/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
-
   const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
   if (existingUser && existingUser !== userId) {
     res.status(400).json({ error: 'This Telegram ID is already registered' });
     return;
   }
-
   if (!data.users[userId]) {
     const username = req.query.username || 'Anonymous';
     data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [] };
     await writeData(data);
   }
-
   res.json(data.users[userId]);
 });
 
@@ -122,32 +113,24 @@ app.get('/start/:referralCode', async (req, res) => {
   const userId = req.query.userId || Date.now().toString();
   const username = req.query.username || 'Anonymous';
   const data = await readData();
-
-  console.log(`Received /start request: referralCode=${referralCode}, userId=${userId}, username=${username}`);
-
   const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
   if (existingUser) {
-    console.log(`User ${userId} already registered`);
     res.status(400).json({ error: 'This Telegram ID is already registered' });
     return;
   }
-
   if (!data.users[userId]) {
     data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [] };
   }
-
   if (data.users[referralCode]) {
     data.users[referralCode].referrals.push(userId);
     data.users[userId].referredBy = referralCode;
     console.log(`Added referral: ${userId} to ${referralCode}`);
   }
-
   await writeData(data);
-
   res.json({ userId, message: 'Referral activated via start' });
 });
 
-// Временный эндпоинт для сброса данных (для тестирования)
+// Временный эндпоинт для сброса данных
 app.get('/reset-users', async (req, res) => {
   await fs.writeFile(dataFile, '{"users": {}}', 'utf8');
   res.json({ message: 'users.json reset' });
