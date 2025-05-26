@@ -1,7 +1,14 @@
 const express = require('express');
 const fs = require('fs').promises;
+const TelegramBot = require('node-telegram-bot-api');
 const app = express();
 const dataFile = 'users.json';
+
+// Токен вашего бота
+const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA';
+
+// Настройка бота
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
 // Middleware для CORS
 app.use((req, res, next) => {
@@ -70,6 +77,31 @@ setInterval(async () => {
     console.error('Error updating points:', error);
   }
 }, 1000);
+
+// Обработка команды /start
+bot.onText(/\/start(?:\s+(\S+))?/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const referralCode = match[1]; // Параметр после /start (например, userId)
+
+  console.log(`Received /start from chatId=${chatId}, referralCode=${referralCode}`);
+
+  const webAppUrl = referralCode
+    ? `https://sokzaq.github.io/telegram-bot-frontend/?start=${referralCode}`
+    : `https://sokzaq.github.io/telegram-bot-frontend/`;
+
+  bot.sendMessage(chatId, 'Нажмите ниже, чтобы открыть приложение:', {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: 'Open',
+            web_app: { url: webAppUrl }
+          }
+        ]
+      ]
+    }
+  });
+});
 
 // Эндпоинт для получения баланса
 app.get('/user/:userId', async (req, res) => {
