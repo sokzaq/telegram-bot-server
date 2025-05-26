@@ -1,11 +1,11 @@
 const express = require('express');
 const fs = require('fs').promises;
-const axios = require('axios'); // Добавляем axios для запросов к Telegram API
+const axios = require('axios');
 const app = express();
 const dataFile = 'users.json';
 
-// Токен вашего бота (замените на ваш)
-const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA'; // Замените на ваш токен
+// Токен вашего бота
+const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA';
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 // Middleware для CORS
@@ -126,7 +126,7 @@ app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
   const userId = req.query.userId || Date.now().toString();
   const username = req.query.username || 'Anonymous';
-  const chatId = userId; // Предполагаем, что userId совпадает с chatId
+  const chatId = userId;
   const data = await readData();
 
   const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
