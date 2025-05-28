@@ -8,6 +8,9 @@ const dataFile = 'users.json';
 const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA';
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
+// Middleware для парсинга JSON
+app.use(express.json());
+
 // Middleware для CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -57,17 +60,12 @@ setInterval(async () => {
       const lastUpdate = user.lastUpdate || now;
       const timeDiff = (now - lastUpdate) / 1000;
 
-      // Сохраняем предыдущий баланс
       const previousPoints = user.points || 0;
-
-      // Обновляем баланс пользователя
       user.points = (user.points || 0) + (timeDiff * 0.0001);
       user.lastUpdate = now;
 
-      // Рассчитываем новый доход (разницу)
       const newIncome = user.points - previousPoints;
 
-      // Начисляем бонусный доход от рефералов
       if (user.referrals) {
         for (const referralId of user.referrals) {
           if (data.users[referralId]) {
@@ -76,22 +74,18 @@ setInterval(async () => {
             const referralNewPoints = referral.points || 0;
             const referralNewIncome = referralNewPoints - referralPreviousPoints;
 
-            // Бонус 0,01% от нового дохода реферала
-            const referralEarnings = referralNewIncome * 0.0001; // 0,01%
+            const referralEarnings = referralNewIncome * 0.0001;
             if (referralEarnings > 0) {
               user.points += referralEarnings;
-              // Обновляем суммарный доход от рефералов
               user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
               console.log(`Added ${referralEarnings} to ${userId} from referral ${referralId}, total referral earnings: ${user.referralEarnings}`);
             }
 
-            // Обновляем lastPoints для реферала
             referral.lastPoints = referralNewPoints;
           }
         }
       }
 
-      // Обновляем lastPoints для пользователя
       user.lastPoints = user.points;
     }
 
@@ -171,7 +165,6 @@ app.get('/start/:referralCode', async (req, res) => {
 
   await writeData(data);
 
-  // Отправляем сообщение с inline-кнопкой через Telegram API
   try {
     const webAppUrl = `https://sokzaq.github.io/telegram-bot-frontend/?start=${referralCode}`;
     await axios.post(`${TELEGRAM_API}/sendMessage`, {
@@ -196,6 +189,54 @@ app.get('/start/:referralCode', async (req, res) => {
   res.json({ userId, message: 'Referral activated via start' });
 });
 
+// Эндпоинт для вебхука
+app.post('/webhook', async (req, res) => {
+  const update = req.body;
+
+  if (update.message && update.message.text) {
+    const chatId = update.message.chat.id.toString();
+    const text = update.message.text;
+    const userId = update.message.from.id.toString();
+    const username = update.message.from.username || 'Anonymous';
+
+    if (text.startsWith('/start')) {
+      const referralCode = text.split(' ')[1] || ''; // Извлекаем параметр start
+      const data = await readData();
+
+      const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
+      if (!existingUser) {
+        data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], lastPoints: 0, referralEarnings: 0 };
+        if (referralCode && data.users[referralCode]) {
+          data.users[referralCode].referrals.push(userId);
+          data.users[userId].referredBy = referralCode;
+        }
+        await writeData(data);
+      }
+
+      const webAppUrl = referralCode
+        ? `https://sokzaq.github.io/telegram-bot-frontend/?start=${referralCode}`
+        : 'https://sokzaq.github.io/telegram-bot-frontend/';
+
+      await axios.post(`${TELEGRAM_API}/sendMessage`, {
+        chat_id: chatId,
+        text: 'Добро пожаловать в AFK2earn_bot! Нажмите ниже, чтобы открыть приложение и начать зарабатывать.',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: 'Open',
+                web_app: { url: webAppUrl }
+              }
+            ]
+          ]
+        }
+      });
+    }
+  }
+
+  res.sendStatus(200);
+});
+
 // Временный эндпоинт для сброса данных (для тестирования)
 app.get('/reset-users', async (req, res) => {
   await fs.writeFile(dataFile, '{"users": {}}', 'utf8');
@@ -204,7 +245,18 @@ app.get('/reset-users', async (req, res) => {
 
 // Запуск сервера
 const PORT = process.env.PORT || 3000;
-initializeDataFile().then(() => {
+initializeDataFile().then(async () => {
+  // Устанавливаем вебхук
+  const webhookUrl = 'https://telegram-bot-server-1xsp.onrender.com/webhook';
+  try {
+    await axios.post(`${TELEGRAM_API}/setWebhook`, {
+      url: webhookUrl
+    });
+    console.log(`Webhook set to ${webhookUrl}`);
+  } catch (error) {
+    console.error('Error setting webhook:', error);
+  }
+
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
