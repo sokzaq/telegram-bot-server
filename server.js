@@ -140,12 +140,11 @@ app.get('/referrals/:userId', async (req, res) => {
   res.json({ referrals: referralsData, totalReferralEarnings: user.referralEarnings || 0 });
 });
 
-// Эндпоинт для активации реферала через start
+// Эндпоинт для активации реферала (для совместимости с index.html)
 app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
   const userId = req.query.userId || Date.now().toString();
   const username = req.query.username || 'Anonymous';
-  const chatId = userId;
   const data = await readData();
 
   const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
@@ -158,33 +157,12 @@ app.get('/start/:referralCode', async (req, res) => {
     data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], lastPoints: 0, referralEarnings: 0 };
   }
 
-  if (data.users[referralCode]) {
+  if (referralCode && data.users[referralCode]) {
     data.users[referralCode].referrals.push(userId);
     data.users[userId].referredBy = referralCode;
   }
 
   await writeData(data);
-
-  try {
-    const webAppUrl = `https://sokzaq.github.io/telegram-bot-frontend/?start=${referralCode}`;
-    await axios.post(`${TELEGRAM_API}/sendMessage`, {
-      chat_id: chatId,
-      text: 'Добро пожаловать в AFK2earn_bot! Нажмите ниже, чтобы открыть приложение и начать зарабатывать.',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: 'Open',
-              web_app: { url: webAppUrl }
-            }
-          ]
-        ]
-      }
-    });
-    console.log(`Sent inline button to user ${userId}`);
-  } catch (error) {
-    console.error('Error sending Telegram message:', error);
-  }
 
   res.json({ userId, message: 'Referral activated via start' });
 });
@@ -199,7 +177,7 @@ app.post('/webhook', async (req, res) => {
     const userId = update.message.from.id.toString();
     const username = update.message.from.username || 'Anonymous';
 
-    if (text.startsWith('/start')) {
+    if (text === '/start' || text.startsWith('/start ')) {
       const referralCode = text.split(' ')[1] || ''; // Извлекаем параметр start
       const data = await readData();
 
@@ -209,6 +187,7 @@ app.post('/webhook', async (req, res) => {
         if (referralCode && data.users[referralCode]) {
           data.users[referralCode].referrals.push(userId);
           data.users[userId].referredBy = referralCode;
+          console.log(`Registered referral: ${userId} for ${referralCode}`);
         }
         await writeData(data);
       }
@@ -217,20 +196,25 @@ app.post('/webhook', async (req, res) => {
         ? `https://sokzaq.github.io/telegram-bot-frontend/?start=${referralCode}`
         : 'https://sokzaq.github.io/telegram-bot-frontend/';
 
-      await axios.post(`${TELEGRAM_API}/sendMessage`, {
-        chat_id: chatId,
-        text: 'Добро пожаловать в AFK2earn_bot! Нажмите ниже, чтобы открыть приложение и начать зарабатывать.',
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: 'Open',
-                web_app: { url: webAppUrl }
-              }
+      try {
+        await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: chatId,
+          text: 'Добро пожаловать в AFK2earn_bot! Нажмите ниже, чтобы открыть приложение и начать зарабатывать.',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: 'Open',
+                  web_app: { url: webAppUrl }
+                }
+              ]
             ]
-          ]
-        }
-      });
+          }
+        });
+        console.log(`Sent inline button to chat ${chatId} for user ${userId}`);
+      } catch (error) {
+        console.error('Error sending Telegram message:', error);
+      }
     }
   }
 
