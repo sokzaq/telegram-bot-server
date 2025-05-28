@@ -4,9 +4,9 @@ const axios = require('axios');
 const app = express();
 const dataFile = 'users.json';
 
+// Токен вашего бота
 const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA';
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
-const webAppUrl = 'https://sokzaq.github.io/telegram-bot-frontend/';
 
 // Middleware для CORS
 app.use((req, res, next) => {
@@ -56,18 +56,43 @@ setInterval(async () => {
       const user = data.users[userId];
       const lastUpdate = user.lastUpdate || now;
       const timeDiff = (now - lastUpdate) / 1000;
+
+      // Сохраняем предыдущий баланс
+      const previousPoints = user.points || 0;
+
+      // Обновляем баланс пользователя
       user.points = (user.points || 0) + (timeDiff * 0.0001);
       user.lastUpdate = now;
 
+      // Рассчитываем новый доход (разницу)
+      const newIncome = user.points - previousPoints;
+
+      // Начисляем бонусный доход от рефералов
       if (user.referrals) {
         for (const referralId of user.referrals) {
           if (data.users[referralId]) {
-            const referralEarnings = (data.users[referralId].points || 0) * 0.0001;
-            user.points += referralEarnings;
-            console.log(`Added ${referralEarnings} to ${userId} from referral ${referralId}`);
+            const referral = data.users[referralId];
+            const referralPreviousPoints = referral.lastPoints || 0;
+            const referralNewPoints = referral.points || 0;
+            const referralNewIncome = referralNewPoints - referralPreviousPoints;
+
+            // Бонус 0,01% от нового дохода реферала
+            const referralEarnings = referralNewIncome * 0.0001; // 0,01%
+            if (referralEarnings > 0) {
+              user.points += referralEarnings;
+              // Обновляем суммарный доход от рефералов
+              user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
+              console.log(`Added ${referralEarnings} to ${userId} from referral ${referralId}, total referral earnings: ${user.referralEarnings}`);
+            }
+
+            // Обновляем lastPoints для реферала
+            referral.lastPoints = referralNewPoints;
           }
         }
       }
+
+      // Обновляем lastPoints для пользователя
+      user.lastPoints = user.points;
     }
 
     await writeData(data);
@@ -89,7 +114,7 @@ app.get('/user/:userId', async (req, res) => {
 
   if (!data.users[userId]) {
     const username = req.query.username || 'Anonymous';
-    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [] };
+    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], lastPoints: 0, referralEarnings: 0 };
     await writeData(data);
   }
 
@@ -110,15 +135,15 @@ app.get('/leaderboard', async (req, res) => {
 app.get('/referrals/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
-  const user = data.users[userId] || { referrals: [] };
+  const user = data.users[userId] || { referrals: [], referralEarnings: 0 };
   const referralsData = await Promise.all(
     user.referrals.map(async (referralId) => {
-      const referral = data.users[referralId] || { points: 0 };
-      const referralEarnings = (referral.points || 0) * 0.0001;
+      const referral = data.users[referralId] || { points: 0, lastPoints: 0 };
+      const referralEarnings = ((referral.points || 0) - (referral.lastPoints || 0)) * 0.0001;
       return { referralId, points: referral.points, earnings: referralEarnings };
     })
   );
-  res.json({ referrals: referralsData });
+  res.json({ referrals: referralsData, totalReferralEarnings: user.referralEarnings || 0 });
 });
 
 // Эндпоинт для активации реферала через start
@@ -126,33 +151,32 @@ app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
   const userId = req.query.userId || Date.now().toString();
   const username = req.query.username || 'Anonymous';
+  const chatId = userId;
   const data = await readData();
-
-  console.log(`Received /start request: referralCode=${referralCode}, userId=${userId}, username=${username}`);
 
   const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
   if (existingUser) {
-    console.log(`User ${userId} already registered`);
     res.status(400).json({ error: 'This Telegram ID is already registered' });
     return;
   }
 
   if (!data.users[userId]) {
-    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [] };
+    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], lastPoints: 0, referralEarnings: 0 };
   }
 
   if (data.users[referralCode]) {
     data.users[referralCode].referrals.push(userId);
     data.users[userId].referredBy = referralCode;
-    console.log(`Added referral: ${userId} to ${referralCode}`);
   }
 
   await writeData(data);
 
+  // Отправляем сообщение с inline-кнопкой через Telegram API
   try {
+    const webAppUrl = `https://sokzaq.github.io/telegram-bot-frontend/?start=${referralCode}`;
     await axios.post(`${TELEGRAM_API}/sendMessage`, {
-      chat_id: userId,
-      text: 'Нажмите ниже, чтобы открыть приложение:',
+      chat_id: chatId,
+      text: 'Добро пожаловать в AFK2earn_bot! Нажмите ниже, чтобы открыть приложение и начать зарабатывать.',
       reply_markup: {
         inline_keyboard: [
           [
@@ -166,7 +190,7 @@ app.get('/start/:referralCode', async (req, res) => {
     });
     console.log(`Sent inline button to user ${userId}`);
   } catch (error) {
-    console.error('Error sending Telegram message:', error.response ? error.response.data : error.message);
+    console.error('Error sending Telegram message:', error);
   }
 
   res.json({ userId, message: 'Referral activated via start' });
