@@ -102,7 +102,7 @@ setInterval(async () => {
           const referralNewPoints = referral.points || 0;
           const referralNewIncome = referralNewPoints - referralPreviousPoints;
 
-          const referralEarnings = referralNewIncome * 0.0001;
+          const referralEarnings = referralNewIncome * 0.001;
           if (referralEarnings > 0) {
             user.points += referralEarnings;
             user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
