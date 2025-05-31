@@ -78,45 +78,51 @@ bot.start(async (ctx) => {
   });
 });
 
-// Обновление баллов каждую секунду
+// Начисление баллов каждую секунду
 setInterval(async () => {
-  const data = await readData();
-  const now = Date.now();
+  try {
+    const data = await readData();
+    const now = Date.now();
 
-  for (const userId in data.users) {
-    const user = data.users[userId];
-    const lastUpdate = user.lastUpdate || now;
-    const timeDiff = (now - lastUpdate) / 1000;
+    for (const userId in data.users) {
+      const user = data.users[userId];
+      const lastUpdate = user.lastUpdate || now;
+      const timeDiff = (now - lastUpdate) / 1000;
 
-    const previousPoints = user.points || 0;
-    user.points = (user.points || 0) + (timeDiff * 0.0001);
-    user.lastUpdate = now;
+      const previousPoints = user.points || 0;
+      user.points = (user.points || 0) + (timeDiff * 0.0001); // Начисление баллов
+      user.lastUpdate = now;
 
-    const newIncome = user.points - previousPoints;
+      const newIncome = user.points - previousPoints;
 
-    if (user.referrals) {
-      for (const referralId of user.referrals) {
-        if (data.users[referralId]) {
-          const referral = data.users[referralId];
-          const referralPreviousPoints = referral.lastPoints || 0;
-          const referralNewPoints = referral.points || 0;
-          const referralNewIncome = referralNewPoints - referralPreviousPoints;
+      // Начисление реферальных бонусов с процентом 0.1% (0.001)
+      if (user.referrals) {
+        for (const referralId of user.referrals) {
+          if (data.users[referralId]) {
+            const referral = data.users[referralId];
+            const referralPreviousPoints = referral.lastPoints || 0;
+            const referralNewPoints = referral.points || 0;
+            const referralNewIncome = referralNewPoints - referralPreviousPoints;
 
-          const referralEarnings = referralNewIncome * 0.001;
-          if (referralEarnings > 0) {
-            user.points += referralEarnings;
-            user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
+            const referralEarnings = referralNewIncome * 0.001;
+            if (referralEarnings > 0) {
+              user.points += referralEarnings;
+              user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
+              console.log(`Added ${referralEarnings.toFixed(4)} to ${userId} from referral ${referralId}`);
+            }
+
+            referral.lastPoints = referralNewPoints;
           }
-
-          referral.lastPoints = referralNewPoints;
         }
       }
+
+      user.lastPoints = user.points;
     }
 
-    user.lastPoints = user.points;
+    await writeData(data);
+  } catch (error) {
+    console.error('Error updating points:', error);
   }
-
-  await writeData(data);
 }, 1000);
 
 // Эндпоинт для получения баланса
@@ -149,16 +155,16 @@ app.get('/leaderboard', async (req, res) => {
   res.json(leaderboard);
 });
 
-// Эндпоинт для рефералов
+// Эндпоинт для рефералов (добавляем username рефералов)
 app.get('/referrals/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
   const user = data.users[userId] || { referrals: [], referralEarnings: 0 };
   const referralsData = await Promise.all(
     user.referrals.map(async (referralId) => {
-      const referral = data.users[referralId] || { points: 0, lastPoints: 0 };
-      const referralEarnings = ((referral.points || 0) - (referral.lastPoints || 0)) * 0.0001;
-      return { referralId, points: referral.points, expectations: referralEarnings };
+      const referral = data.users[referralId] || { points: 0, lastPoints: 0, username: 'Unknown' };
+      const referralEarnings = ((referral.points || 0) - (referral.lastPoints || 0)) * 0.001;
+      return { referralId, username: referral.username, points: referral.points, expectations: referralEarnings };
     })
   );
   res.json({ referrals: referralsData, totalReferralEarnings: user.referralEarnings || 0 });
@@ -184,6 +190,7 @@ app.get('/start/:referralCode', async (req, res) => {
   if (referralCode && data.users[referralCode]) {
     data.users[referralCode].referrals.push(userId);
     data.users[userId].referredBy = referralCode;
+    console.log(`Registered referral via GET: ${userId} for ${referralCode}`);
   }
 
   await writeData(data);
