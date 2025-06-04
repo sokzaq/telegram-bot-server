@@ -240,6 +240,16 @@ initializeDataFile().then(() => {
   });
 });
 
+// Запуск сервера
+const PORT = process.env.PORT || 3000;
+initializeDataFile().then(() => {
+  bot.launch();
+  bot.telegram.sendMessage('@AFK_Co1n', 'Тестовое сообщение от бота'); // Добавьте здесь
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+});
+
 // Остановка бота при завершении процесса
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
