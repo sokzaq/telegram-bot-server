@@ -1,6 +1,7 @@
 const { Telegraf } = require('telegraf');
 const express = require('express');
 const fs = require('fs').promises;
+const axios = require('axios');
 const app = express();
 const dataFile = 'users.json';
 
@@ -8,12 +9,16 @@ const dataFile = 'users.json';
 const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA';
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
+// ID канала для проверки подписки
+const CHAT_ID = '@AFK_Co1n';
+
 app.use(express.json());
 
 // Middleware для CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   next();
 });
 
@@ -90,12 +95,11 @@ setInterval(async () => {
       const timeDiff = (now - lastUpdate) / 1000;
 
       const previousPoints = user.points || 0;
-      user.points = (user.points || 0) + (timeDiff * 0.0001); // Начисление баллов
+      user.points = (user.points || 0) + (timeDiff * 0.0001);
       user.lastUpdate = now;
 
       const newIncome = user.points - previousPoints;
 
-      // Начисление реферальных бонусов с процентом 0.1% (0.001)
       if (user.referrals) {
         for (const referralId of user.referrals) {
           if (data.users[referralId]) {
@@ -155,7 +159,7 @@ app.get('/leaderboard', async (req, res) => {
   res.json(leaderboard);
 });
 
-// Эндпоинт для рефералов (добавляем username рефералов)
+// Эндпоинт для рефералов
 app.get('/referrals/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
@@ -201,6 +205,30 @@ app.get('/start/:referralCode', async (req, res) => {
 app.get('/reset-users', async (req, res) => {
   await fs.writeFile(dataFile, '{"users": {}}', 'utf8');
   res.json({ message: 'users.json reset' });
+});
+
+// Эндпоинт для проверки подписки
+app.post('/check-subscription', async (req, res) => {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+
+  try {
+    const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChatMember?chat_id=${CHAT_ID}&user_id=${userId}`);
+    const data = response.data;
+
+    if (data.ok) {
+      const status = data.result.status;
+      res.json({ subscribed: status === 'member' || status === 'administrator' || status === 'creator' });
+    } else {
+      res.status(400).json({ error: `Failed to check subscription: ${data.description}` });
+    }
+  } catch (error) {
+    console.error('Error checking subscription:', error.message);
+    res.status(500).json({ error: 'Server error while checking subscription' });
+  }
 });
 
 // Запуск сервера
