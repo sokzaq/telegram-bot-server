@@ -29,7 +29,7 @@ async function initializeData() {
   }
 }
 
-// Чтение и запись данных с обработкой ошибок
+// Чтение и запись данных
 async function readData() {
   try {
     const data = await fs.readFile(DATA_FILE, 'utf8');
@@ -55,14 +55,14 @@ async function updatePoints() {
   for (const userId in data.users) {
     const user = data.users[userId];
     const timeDiff = (now - (user.lastUpdate || now)) / 1000;
-    const intervals = Math.floor(timeDiff / 10); // Количество полных 10-секундных интервалов
-    if (intervals > 0) {
-      user.points = (user.points || 0) + (intervals * 0.001); // 0.0001 * 10 = 0.001 за 10 секунд
-      user.lastUpdate = now - ((timeDiff % 10) * 1000); // Сброс на начало последнего интервала
+    const intervals = Math.floor(timeDiff / 10);
+    if (intervals > 0 && user.isTelegramUser) { // Начисление только для Telegram-пользователей
+      user.points = (user.points || 0) + (intervals * 0.001);
+      user.lastUpdate = now - ((timeDiff % 10) * 1000);
 
       if (user.referrals) {
         for (const referralId of user.referrals) {
-          if (data.users[referralId]) {
+          if (data.users[referralId] && data.users[referralId].isTelegramUser) {
             const referral = data.users[referralId];
             const referralNewIncome = (referral.points || 0) - (referral.lastPoints || 0);
             const referralEarnings = referralNewIncome * 0.001;
@@ -81,6 +81,16 @@ async function updatePoints() {
   await writeData(data);
 }
 
+// Обработка запуска Mini App
+bot.on('web_app_data', async (ctx) => {
+  const userId = ctx.from.id.toString();
+  const data = await readData();
+  if (data.users[userId]) {
+    data.users[userId].isTelegramUser = true;
+    await writeData(data);
+  }
+});
+
 // Команда /start без отправки сообщений
 bot.start(async (ctx) => {
   const userId = ctx.from.id.toString();
@@ -98,21 +108,6 @@ bot.start(async (ctx) => {
   }
 });
 
-// Обработка данных из веб-приложения с подтверждением Telegram
-bot.on('message', async (ctx) => {
-  if (ctx.message?.web_app_data) {
-    const { userId } = JSON.parse(ctx.message.web_app_data.data);
-    if (userId) {
-      const data = await readData();
-      if (data.users[userId]) {
-        data.users[userId].isTelegramUser = true;
-        await writeData(data);
-      }
-      await checkSubscription(userId);
-    }
-  }
-});
-
 // Проверка подписки
 async function checkSubscription(userId) {
   try {
@@ -126,7 +121,7 @@ async function checkSubscription(userId) {
   }
 }
 
-// Эндпоинты API с ограничением по Telegram
+// Эндпоинты API с ограничением
 app.get('/user/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
