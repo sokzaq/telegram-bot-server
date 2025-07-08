@@ -3,245 +3,186 @@ const express = require('express');
 const fs = require('fs').promises;
 const axios = require('axios');
 const app = express();
-const dataFile = 'users.json';
 
-// Токен бота
 const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA';
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
-
-// ID канала для проверки подписки
 const CHAT_ID = '@AFK_Co1n';
+const PORT = process.env.PORT || 3000;
+const DATA_FILE = 'users.json';
 
 app.use(express.json());
 
-// Middleware для CORS
+// CORS для всех запросов
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   next();
 });
 
-// Инициализация файла данных
-async function initializeDataFile() {
+// Инициализация или проверка файла данных
+async function initializeData() {
   try {
-    await fs.access(dataFile);
-  } catch (error) {
-    console.log('Creating users.json');
-    await fs.writeFile(dataFile, '{"users": {}}', 'utf8');
+    await fs.access(DATA_FILE);
+  } catch {
+    await fs.writeFile(DATA_FILE, '{"users": {}}', 'utf8');
   }
 }
 
-// Чтение данных
+// Чтение и запись данных с обработкой ошибок
 async function readData() {
   try {
-    const data = await fs.readFile(dataFile, 'utf8');
+    const data = await fs.readFile(DATA_FILE, 'utf8');
     return JSON.parse(data);
-  } catch (error) {
+  } catch {
     return { users: {} };
   }
 }
 
-// Запись данных
 async function writeData(data) {
   try {
-    await fs.copyFile(dataFile, 'users_backup.json');
-    await fs.writeFile(dataFile, JSON.stringify(data, null, 2));
+    await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   } catch (error) {
-    console.error('Error writing data:', error);
+    console.error('Write error:', error);
   }
 }
 
-// Обработка команды /start
+// Обновление баллов и рефералов
+async function updatePoints() {
+  const data = await readData();
+  const now = Date.now();
+
+  for (const userId in data.users) {
+    const user = data.users[userId];
+    const timeDiff = (now - (user.lastUpdate || now)) / 1000;
+    user.points = (user.points || 0) + (timeDiff * 0.0001);
+    user.lastUpdate = now;
+
+    if (user.referrals) {
+      for (const referralId of user.referrals) {
+        if (data.users[referralId]) {
+          const referral = data.users[referralId];
+          const referralNewIncome = (referral.points || 0) - (referral.lastPoints || 0);
+          const referralEarnings = referralNewIncome * 0.001;
+          if (referralEarnings > 0) {
+            user.points += referralEarnings;
+            user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
+          }
+          referral.lastPoints = referral.points || 0;
+        }
+      }
+    }
+    user.lastPoints = user.points;
+  }
+
+  await writeData(data);
+}
+
+// Команда /start без отправки сообщений
 bot.start(async (ctx) => {
-  const chatId = ctx.chat.id.toString();
   const userId = ctx.from.id.toString();
   const username = ctx.from.username || 'Anonymous';
   const referralCode = ctx.message.text.split(' ')[1] || '';
 
   const data = await readData();
-
-  const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
-  if (!existingUser) {
-    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], lastPoints: 0, referralEarnings: 0 };
+  if (!data.users[userId]) {
+    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0 };
     if (referralCode && data.users[referralCode]) {
       data.users[referralCode].referrals.push(userId);
       data.users[userId].referredBy = referralCode;
-      console.log(`Registered referral: ${userId} for ${referralCode}`);
     }
     await writeData(data);
   }
-
-  const webAppUrl = referralCode
-    ? `https://sokzaq.github.io/telegram-bot-frontend/?start=${referralCode}`
-    : 'https://sokzaq.github.io/telegram-bot-frontend/';
-
-  await ctx.reply('Добро пожаловать! Нажмите "Open" для запуска.', {
-    reply_markup: {
-      inline_keyboard: [[{ text: 'Open', web_app: { url: webAppUrl } }]]
-    }
-  });
 });
 
-// Начисление баллов каждую секунду
-setInterval(async () => {
-  try {
-    const data = await readData();
-    const now = Date.now();
-
-    for (const userId in data.users) {
-      const user = data.users[userId];
-      const lastUpdate = user.lastUpdate || now;
-      const timeDiff = (now - lastUpdate) / 1000;
-
-      const previousPoints = user.points || 0;
-      user.points = (user.points || 0) + (timeDiff * 0.0001);
-      user.lastUpdate = now;
-
-      const newIncome = user.points - previousPoints;
-
-      if (user.referrals) {
-        for (const referralId of user.referrals) {
-          if (data.users[referralId]) {
-            const referral = data.users[referralId];
-            const referralPreviousPoints = referral.lastPoints || 0;
-            const referralNewPoints = referral.points || 0;
-            const referralNewIncome = referralNewPoints - referralPreviousPoints;
-
-            const referralEarnings = referralNewIncome * 0.001;
-            if (referralEarnings > 0) {
-              user.points += referralEarnings;
-              user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
-              console.log(`Added ${referralEarnings.toFixed(4)} to ${userId} from referral ${referralId}`);
-            }
-
-            referral.lastPoints = referralNewPoints;
-          }
-        }
-      }
-
-      user.lastPoints = user.points;
+// Обработка данных из веб-приложения
+bot.on('message', async (ctx) => {
+  if (ctx.message?.web_app_data) {
+    const { userId } = JSON.parse(ctx.message.web_app_data.data);
+    if (userId) {
+      await checkSubscription(userId);
     }
-
-    await writeData(data);
-  } catch (error) {
-    console.error('Error updating points:', error);
   }
-}, 1000);
+});
 
-// Эндпоинт для получения баланса
+// Проверка подписки
+async function checkSubscription(userId) {
+  try {
+    const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChatMember`, {
+      params: { chat_id: CHAT_ID, user_id: userId },
+    });
+    return response.data.ok && ['member', 'administrator', 'creator'].includes(response.data.result.status);
+  } catch (error) {
+    console.error('Subscription check error:', error.message);
+    return false;
+  }
+}
+
+// Эндпоинты API
 app.get('/user/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
-
-  const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
-  if (existingUser && existingUser !== userId) {
-    res.status(400).json({ error: 'This Telegram ID is already registered' });
-    return;
-  }
-
   if (!data.users[userId]) {
-    const username = req.query.username || 'Anonymous';
-    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], lastPoints: 0, referralEarnings: 0 };
+    data.users[userId] = { telegramId: userId, username: req.query.username || 'Anonymous', points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0 };
     await writeData(data);
   }
-
   res.json(data.users[userId]);
 });
 
-// Эндпоинт для лидерборда
 app.get('/leaderboard', async (req, res) => {
   const data = await readData();
   const leaderboard = Object.entries(data.users)
-    .map(([userId, user]) => ({ username: user.username || userId, points: user.points }))
+    .map(([id, user]) => ({ username: user.username || id, points: user.points }))
     .sort((a, b) => b.points - a.points)
     .slice(0, 10);
   res.json(leaderboard);
 });
 
-// Эндпоинт для рефералов
 app.get('/referrals/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
   const user = data.users[userId] || { referrals: [], referralEarnings: 0 };
-  const referralsData = await Promise.all(
+  const referrals = await Promise.all(
     user.referrals.map(async (referralId) => {
-      const referral = data.users[referralId] || { points: 0, lastPoints: 0, username: 'Unknown' };
+      const referral = data.users[referralId] || { points: 0, username: 'Unknown' };
       const referralEarnings = ((referral.points || 0) - (referral.lastPoints || 0)) * 0.001;
       return { referralId, username: referral.username, points: referral.points, expectations: referralEarnings };
     })
   );
-  res.json({ referrals: referralsData, totalReferralEarnings: user.referralEarnings || 0 });
+  res.json({ referrals, totalReferralEarnings: user.referralEarnings || 0 });
 });
 
-// Эндпоинт для активации реферала
 app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
   const userId = req.query.userId || Date.now().toString();
   const username = req.query.username || 'Anonymous';
   const data = await readData();
-
-  const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
-  if (existingUser) {
-    res.status(400).json({ error: 'This Telegram ID is already registered' });
-    return;
-  }
-
   if (!data.users[userId]) {
-    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], lastPoints: 0, referralEarnings: 0 };
+    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0 };
+    if (referralCode && data.users[referralCode]) {
+      data.users[referralCode].referrals.push(userId);
+      data.users[userId].referredBy = referralCode;
+    }
+    await writeData(data);
   }
-
-  if (referralCode && data.users[referralCode]) {
-    data.users[referralCode].referrals.push(userId);
-    data.users[userId].referredBy = referralCode;
-    console.log(`Registered referral via GET: ${userId} for ${referralCode}`);
-  }
-
-  await writeData(data);
-  res.json({ userId, message: 'Referral activated via start' });
+  res.json({ userId, message: 'Referral activated' });
 });
 
-// Временный эндпоинт для сброса данных
-app.get('/reset-users', async (req, res) => {
-  await fs.writeFile(dataFile, '{"users": {}}', 'utf8');
-  res.json({ message: 'users.json reset' });
-});
-
-// Эндпоинт для проверки подписки
 app.post('/check-subscription', async (req, res) => {
   const { userId } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ error: 'userId is required' });
-  }
-
-  try {
-    const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChatMember?chat_id=${CHAT_ID}&user_id=${userId}`);
-    const data = response.data;
-
-    if (data.ok) {
-      const status = data.result.status;
-      res.json({ subscribed: status === 'member' || status === 'administrator' || status === 'creator' });
-    } else {
-      res.status(400).json({ error: `Failed to check subscription: ${data.description}` });
-    }
-  } catch (error) {
-    console.error('Error checking subscription:', error.message);
-    res.status(500).json({ error: 'Server error while checking subscription' });
-  }
+  if (!userId) return res.status(400).json({ error: 'userId is required' });
+  const subscribed = await checkSubscription(userId);
+  res.json({ subscribed });
 });
 
-// Запуск сервера
-const PORT = process.env.PORT || 3000;
-initializeDataFile().then(() => {
+// Запуск
+(async () => {
+  await initializeData();
   bot.launch();
-  bot.telegram.sendMessage('@AFK_Co1n', 'Тестовое сообщение от бота');
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-});
+  setInterval(updatePoints, 1000);
+  app.listen(PORT, () => console.log(`Server on port ${PORT}`));
+})();
 
-
-// Остановка бота при завершении процесса
+// Остановка бота
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
