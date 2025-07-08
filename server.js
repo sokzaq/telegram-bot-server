@@ -56,7 +56,7 @@ async function updatePoints() {
     const user = data.users[userId];
     const timeDiff = (now - (user.lastUpdate || now)) / 1000;
     const intervals = Math.floor(timeDiff / 10);
-    if (intervals > 0 && user.isTelegramUser) { // Начисление только для Telegram-пользователей
+    if (intervals > 0 && user.isTelegramUser) {
       user.points = (user.points || 0) + (intervals * 0.001);
       user.lastUpdate = now - ((timeDiff % 10) * 1000);
 
@@ -81,16 +81,6 @@ async function updatePoints() {
   await writeData(data);
 }
 
-// Обработка запуска Mini App
-bot.on('web_app_data', async (ctx) => {
-  const userId = ctx.from.id.toString();
-  const data = await readData();
-  if (data.users[userId]) {
-    data.users[userId].isTelegramUser = true;
-    await writeData(data);
-  }
-});
-
 // Команда /start без отправки сообщений
 bot.start(async (ctx) => {
   const userId = ctx.from.id.toString();
@@ -108,13 +98,22 @@ bot.start(async (ctx) => {
   }
 });
 
-// Проверка подписки
+// Проверка подписки и активация пользователя
 async function checkSubscription(userId) {
   try {
     const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChatMember`, {
       params: { chat_id: CHAT_ID, user_id: userId },
     });
-    return response.data.ok && ['member', 'administrator', 'creator'].includes(response.data.result.status);
+    const data = response.data;
+    if (data.ok && ['member', 'administrator', 'creator'].includes(data.result.status)) {
+      const userData = await readData();
+      if (userData.users[userId] && !userData.users[userId].isTelegramUser) {
+        userData.users[userId].isTelegramUser = true;
+        await writeData(userData);
+      }
+      return true;
+    }
+    return false;
   } catch (error) {
     console.error('Subscription check error:', error.message);
     return false;
