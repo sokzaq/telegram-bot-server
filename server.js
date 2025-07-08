@@ -47,7 +47,7 @@ async function writeData(data) {
   }
 }
 
-// Обновление баллов и рефералов
+// Обновление баллов и рефералов каждые 10 секунд
 async function updatePoints() {
   const data = await readData();
   const now = Date.now();
@@ -55,24 +55,27 @@ async function updatePoints() {
   for (const userId in data.users) {
     const user = data.users[userId];
     const timeDiff = (now - (user.lastUpdate || now)) / 1000;
-    user.points = (user.points || 0) + (timeDiff * 0.0001);
-    user.lastUpdate = now;
+    const intervals = Math.floor(timeDiff / 10); // Количество полных 10-секундных интервалов
+    if (intervals > 0) {
+      user.points = (user.points || 0) + (intervals * 0.001); // 0.0001 * 10 = 0.001 за 10 секунд
+      user.lastUpdate = now - ((timeDiff % 10) * 1000); // Сброс на начало последнего интервала
 
-    if (user.referrals) {
-      for (const referralId of user.referrals) {
-        if (data.users[referralId]) {
-          const referral = data.users[referralId];
-          const referralNewIncome = (referral.points || 0) - (referral.lastPoints || 0);
-          const referralEarnings = referralNewIncome * 0.001;
-          if (referralEarnings > 0) {
-            user.points += referralEarnings;
-            user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
+      if (user.referrals) {
+        for (const referralId of user.referrals) {
+          if (data.users[referralId]) {
+            const referral = data.users[referralId];
+            const referralNewIncome = (referral.points || 0) - (referral.lastPoints || 0);
+            const referralEarnings = referralNewIncome * 0.001;
+            if (referralEarnings > 0) {
+              user.points += referralEarnings;
+              user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
+            }
+            referral.lastPoints = referral.points || 0;
           }
-          referral.lastPoints = referral.points || 0;
         }
       }
+      user.lastPoints = user.points;
     }
-    user.lastPoints = user.points;
   }
 
   await writeData(data);
@@ -86,7 +89,7 @@ bot.start(async (ctx) => {
 
   const data = await readData();
   if (!data.users[userId]) {
-    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0 };
+    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0, isTelegramUser: false };
     if (referralCode && data.users[referralCode]) {
       data.users[referralCode].referrals.push(userId);
       data.users[userId].referredBy = referralCode;
@@ -95,11 +98,16 @@ bot.start(async (ctx) => {
   }
 });
 
-// Обработка данных из веб-приложения
+// Обработка данных из веб-приложения с подтверждением Telegram
 bot.on('message', async (ctx) => {
   if (ctx.message?.web_app_data) {
     const { userId } = JSON.parse(ctx.message.web_app_data.data);
     if (userId) {
+      const data = await readData();
+      if (data.users[userId]) {
+        data.users[userId].isTelegramUser = true;
+        await writeData(data);
+      }
       await checkSubscription(userId);
     }
   }
@@ -118,13 +126,16 @@ async function checkSubscription(userId) {
   }
 }
 
-// Эндпоинты API
+// Эндпоинты API с ограничением по Telegram
 app.get('/user/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
   if (!data.users[userId]) {
-    data.users[userId] = { telegramId: userId, username: req.query.username || 'Anonymous', points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0 };
+    data.users[userId] = { telegramId: userId, username: req.query.username || 'Anonymous', points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0, isTelegramUser: false };
     await writeData(data);
+  }
+  if (!data.users[userId].isTelegramUser) {
+    return res.status(403).json({ error: 'Access denied. Use Telegram Mini App to earn points.' });
   }
   res.json(data.users[userId]);
 });
@@ -132,6 +143,7 @@ app.get('/user/:userId', async (req, res) => {
 app.get('/leaderboard', async (req, res) => {
   const data = await readData();
   const leaderboard = Object.entries(data.users)
+    .filter(([, user]) => user.isTelegramUser)
     .map(([id, user]) => ({ username: user.username || id, points: user.points }))
     .sort((a, b) => b.points - a.points)
     .slice(0, 10);
@@ -142,6 +154,9 @@ app.get('/referrals/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
   const user = data.users[userId] || { referrals: [], referralEarnings: 0 };
+  if (!user.isTelegramUser) {
+    return res.status(403).json({ error: 'Access denied. Use Telegram Mini App to earn points.' });
+  }
   const referrals = await Promise.all(
     user.referrals.map(async (referralId) => {
       const referral = data.users[referralId] || { points: 0, username: 'Unknown' };
@@ -158,12 +173,15 @@ app.get('/start/:referralCode', async (req, res) => {
   const username = req.query.username || 'Anonymous';
   const data = await readData();
   if (!data.users[userId]) {
-    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0 };
+    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0, isTelegramUser: false };
     if (referralCode && data.users[referralCode]) {
       data.users[referralCode].referrals.push(userId);
       data.users[userId].referredBy = referralCode;
     }
     await writeData(data);
+  }
+  if (!data.users[userId].isTelegramUser) {
+    return res.status(403).json({ error: 'Access denied. Use Telegram Mini App to earn points.' });
   }
   res.json({ userId, message: 'Referral activated' });
 });
@@ -179,7 +197,7 @@ app.post('/check-subscription', async (req, res) => {
 (async () => {
   await initializeData();
   bot.launch();
-  setInterval(updatePoints, 1000);
+  setInterval(updatePoints, 10000); // 10 секунд
   app.listen(PORT, () => console.log(`Server on port ${PORT}`));
 })();
 
