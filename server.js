@@ -189,6 +189,7 @@ app.get('/referrals/:userId', async (req, res) => {
 });
 
 app.get('/start/:referralCode', async (req, res) => {
+  console.log('Received /start request - params:', req.params, 'query:', req.query); // Добавлена отладка
   const referralCode = req.params.referralCode;
   const userId = req.query.userId;
   const username = req.query.username || 'Anonymous';
