@@ -4,7 +4,7 @@ const fs = require('fs').promises;
 const axios = require('axios');
 const app = express();
 
-const TELEGRAM_BOT_TOKEN = '7784941820:AAHRvrpswOAR0iEvtlRlh2rXLSU0_ZBIqSA';
+const TELEGRAM_BOT_TOKEN = '7784941820:AAEGj1qqZsBaj-G9g3qVsAm7XcSRraJ-y8o';
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 const CHAT_ID = '@AFK_Co1n';
 const PORT = process.env.PORT || 3000;
