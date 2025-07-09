@@ -82,7 +82,9 @@ async function processReferral(userId, username, referralCode = '') {
   const data = await readData();
   console.log(`Обработка реферала: userId=${userId}, referralCode=${referralCode}`);
   if (!data.users[userId]) {
-    data.users[userId] = {
+    dataਰ
+
+data.users[userId] = {
       telegramId: userId,
       username,
       points: 0,
@@ -183,14 +185,10 @@ app.get('/referrals/:userId', async (req, res) => {
 
 app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
-  const userId = req.query.userId || Date.now().toString();
+  const userId = req.query.userId;
   const username = req.query.username || 'Anonymous';
+  console.log('Получен запрос на активацию реферала:', { referralCode, userId, username });
   const data = await readData();
-
-  const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
-  if (existingUser) {
-    return res.status(400).json({ error: 'Этот Telegram ID уже зарегистрирован' });
-  }
 
   if (!data.users[userId]) {
     data.users[userId] = {
@@ -203,15 +201,15 @@ app.get('/start/:referralCode', async (req, res) => {
       isTelegramUser: false,
       referredBy: referralCode
     };
+    if (referralCode && data.users[referralCode]) {
+      data.users[referralCode].referrals.push(userId);
+      console.log(`Реферал зарегистрирован: ${userId} для ${referralCode}`);
+    }
+    await writeData(data);
+    res.json({ userId, message: 'Реферал активирован через start' });
+  } else {
+    res.status(400).json({ error: 'Пользователь уже зарегистрирован' });
   }
-
-  if (referralCode && data.users[referralCode]) {
-    data.users[referralCode].referrals.push(userId);
-    console.log(`Зарегистрирован реферал через GET: ${userId} для ${referralCode}`);
-  }
-
-  await writeData(data);
-  res.json({ userId, message: 'Реферал активирован через start' });
 });
 
 app.post('/check-subscription', async (req, res) => {
