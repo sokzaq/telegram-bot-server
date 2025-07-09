@@ -81,12 +81,6 @@ async function updatePoints() {
 async function processReferral(userId, username, referralCode = '') {
   const data = await readData();
   console.log(`Обработка реферала: userId=${userId}, referralCode=${referralCode}`);
-  const referrerId = referralCode.startsWith('ref_') ? referralCode.replace('ref_', '') : null;
-
-  if (!referrerId || !data.users[referrerId]) {
-    console.log(`Реферер не найден или код неверный: referrerId=${referrerId}`);
-  }
-
   if (!data.users[userId]) {
     data.users[userId] = {
       telegramId: userId,
@@ -96,32 +90,32 @@ async function processReferral(userId, username, referralCode = '') {
       referrals: [],
       referralEarnings: 0,
       isTelegramUser: false,
-      referredBy: referrerId || null
+      referredBy: referralCode ? referralCode : null
     };
-    if (referrerId && data.users[referrerId]) {
-      data.users[referrerId].referrals.push(userId);
-      console.log(`Реферал активирован: ${userId} приглашён ${referrerId}`);
+    if (referralCode && data.users[referralCode]) {
+      data.users[referralCode].referrals.push(userId);
+      console.log(`Реферал зарегистрирован: ${userId} для ${referralCode}`);
     }
     await writeData(data);
     return { success: true, message: 'Пользователь зарегистрирован' };
   }
-  if (referrerId && !data.users[userId].referredBy && data.users[referrerId]) {
-    data.users[referrerId].referrals.push(userId);
-    data.users[userId].referredBy = referrerId;
+  if (referralCode && !data.users[userId].referredBy && data.users[referralCode]) {
+    data.users[referralCode].referrals.push(userId);
+    data.users[userId].referredBy = referralCode;
     await writeData(data);
-    console.log(`Реферал привязан: ${userId} к ${referrerId}`);
+    console.log(`Реферал привязан: ${userId} к ${referralCode}`);
     return { success: true, message: 'Реферал активирован' };
   }
-  return { success: false, message: 'Пользователь уже зарегистрирован или код неверный' };
+  return { success: false, message: 'Пользователь уже зарегистрирован' };
 }
 
 // Команда /start
 bot.start(async (ctx) => {
   const userId = ctx.from.id.toString();
   const username = ctx.from.username || 'Anonymous';
-  const referralCode = ctx.startParam || '';
+  const referralCode = ctx.message.text.split(' ')[1] || '';
   const result = await processReferral(userId, username, referralCode);
-  await ctx.reply('Добро пожаловать! Используйте мини-приложение.');
+  await ctx.reply(result.message || 'Добро пожаловать! Используйте мини-приложение.');
 });
 
 // Проверка подписки
@@ -181,25 +175,43 @@ app.get('/referrals/:userId', async (req, res) => {
   }
   const referrals = user.referrals.map(referralId => {
     const referral = data.users[referralId] || { points: 0, username: 'Unknown' };
-    return { referralId, username: referral.username, points: referral.points };
+    const referralEarnings = ((referral.points || 0) - (referral.lastPoints || 0)) * 0.001;
+    return { referralId, username: referral.username, points: referral.points, expectations: referralEarnings };
   });
   res.json({ referrals, totalReferralEarnings: user.referralEarnings || 0 });
 });
 
-app.get('/referral/:refCode', async (req, res) => {
-  console.log('Получен запрос реферала:', req.params, req.query);
-  const refCode = req.params.refCode;
-  const userId = req.query.userId;
+app.get('/start/:referralCode', async (req, res) => {
+  const referralCode = req.params.referralCode;
+  const userId = req.query.userId || Date.now().toString();
   const username = req.query.username || 'Anonymous';
-  if (!userId || !refCode.startsWith('ref_')) {
-    return res.status(400).json({ error: 'Неверный код или userId' });
+  const data = await readData();
+
+  const existingUser = Object.keys(data.users).find(id => data.users[id].telegramId === userId);
+  if (existingUser) {
+    return res.status(400).json({ error: 'Этот Telegram ID уже зарегистрирован' });
   }
-  const result = await processReferral(userId, username, refCode);
-  if (result.success) {
-    res.json({ userId, message: result.message });
-  } else {
-    res.status(400).json({ error: result.message });
+
+  if (!data.users[userId]) {
+    data.users[userId] = {
+      telegramId: userId,
+      username,
+      points: 0,
+      lastUpdate: Date.now(),
+      referrals: [],
+      referralEarnings: 0,
+      isTelegramUser: false,
+      referredBy: referralCode
+    };
   }
+
+  if (referralCode && data.users[referralCode]) {
+    data.users[referralCode].referrals.push(userId);
+    console.log(`Зарегистрирован реферал через GET: ${userId} для ${referralCode}`);
+  }
+
+  await writeData(data);
+  res.json({ userId, message: 'Реферал активирован через start' });
 });
 
 app.post('/check-subscription', async (req, res) => {
