@@ -7,7 +7,7 @@ const app = express();
 const TELEGRAM_BOT_TOKEN = '7784941820:AAEGj1qqZsBaj-G9g3qVsAm7XcSRraJ-y8o';
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 const CHAT_ID = '@AFK_Co1n';
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000; // Убедимся, что порт совпадает с Render
 const DATA_FILE = 'users.json';
 
 app.use(express.json());
@@ -81,11 +81,11 @@ async function updatePoints() {
   await writeData(data);
 }
 
-// Команда /start без отправки сообщений
+// Команда /start
 bot.start(async (ctx) => {
   const userId = ctx.from.id.toString();
   const username = ctx.from.username || 'Anonymous';
-  const referralCode = ctx.message.text.split(' ')[1] || '';
+  const referralCode = ctx.startParam || ''; // Используем startParam из webhook
 
   const data = await readData();
   if (!data.users[userId]) {
@@ -96,9 +96,10 @@ bot.start(async (ctx) => {
     }
     await writeData(data);
   }
+  await ctx.reply('Добро пожаловать! Используйте мини-приложение для заработка.'); // Подтверждение запуска
 });
 
-// Проверка подписки с отладкой
+// Проверка подписки
 async function checkSubscription(userId) {
   console.log(`Checking subscription for userId: ${userId}`);
   try {
@@ -122,7 +123,7 @@ async function checkSubscription(userId) {
   }
 }
 
-// Эндпоинты API с ограничением
+// Эндпоинты API
 app.get('/user/:userId', async (req, res) => {
   const userId = req.params.userId;
   const data = await readData();
@@ -190,13 +191,18 @@ app.post('/check-subscription', async (req, res) => {
   res.json({ subscribed });
 });
 
-// Запуск
-(async () => {
-  await initializeData();
-  bot.launch();
-  setInterval(updatePoints, 10000); // 10 секунд
-  app.listen(PORT, () => console.log(`Server on port ${PORT}`));
-})();
+// Настройка webhook
+const WEBHOOK_URL = 'https://telegram-bot-server-ixsp.onrender.com'; // Убедись, что URL верный
+app.use(bot.webhookCallback('/webhook'));
+bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
+
+setInterval(updatePoints, 10000); // 10 секунд
+
+// Запуск сервера
+app.listen(PORT, () => {
+  console.log(`Server on port ${PORT}`);
+  initializeData().catch(console.error);
+});
 
 // Остановка бота
 process.once('SIGINT', () => bot.stop('SIGINT'));
