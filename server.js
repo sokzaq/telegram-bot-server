@@ -90,27 +90,27 @@ async function processReferral(userId, username, referralCode = '') {
       referrals: [],
       referralEarnings: 0,
       isTelegramUser: false,
-      referredBy: referralCode || null
+      referredBy: referralCode ? referralCode.replace('ref_', '') : null
     };
-    if (referralCode && data.users[referralCode]) {
-      if (!data.users[referralCode].referrals.includes(userId)) {
-        data.users[referralCode].referrals.push(userId);
-        console.log(`Referral activated: ${userId} referred by ${referralCode}`);
+    if (referralCode && data.users[referralCode.replace('ref_', '')]) {
+      if (!data.users[referralCode.replace('ref_', '')].referrals.includes(userId)) {
+        data.users[referralCode.replace('ref_', '')].referrals.push(userId);
+        console.log(`Referral activated: ${userId} referred by ${referralCode.replace('ref_', '')}`);
       }
     }
     await writeData(data);
-    return { success: true, message: 'User registered', user: data.users[userId] };
+    return { success: true, message: 'User registered' };
   }
-  if (referralCode && !data.users[userId].referredBy && data.users[referralCode]) {
-    if (!data.users[referralCode].referrals.includes(userId)) {
-      data.users[referralCode].referrals.push(userId);
-      data.users[userId].referredBy = referralCode;
+  if (referralCode && !data.users[userId].referredBy && data.users[referralCode.replace('ref_', '')]) {
+    if (!data.users[referralCode.replace('ref_', '')].referrals.includes(userId)) {
+      data.users[referralCode.replace('ref_', '')].referrals.push(userId);
+      data.users[userId].referredBy = referralCode.replace('ref_', '');
       await writeData(data);
-      console.log(`Referral linked: ${userId} referred by ${referralCode}`);
-      return { success: true, message: 'Referral activated', user: data.users[userId] };
+      console.log(`Referral linked: ${userId} referred by ${referralCode.replace('ref_', '')}`);
+      return { success: true, message: 'Referral activated' };
     }
   }
-  return { success: false, message: 'User already registered', user: data.users[userId] || {} };
+  return { success: false, message: 'User already registered' };
 }
 
 // Команда /start
@@ -151,10 +151,7 @@ app.get('/user/:userId', async (req, res) => {
   const username = req.query.username || 'Anonymous';
   const data = await readData();
   if (!data.users[userId]) {
-    const result = await processReferral(userId, username);
-    if (!result.user) {
-      return res.status(500).json({ error: 'Failed to register user' });
-    }
+    await processReferral(userId, username);
   }
   const user = data.users[userId] || {};
   if (!user.isTelegramUser) {
@@ -188,13 +185,15 @@ app.get('/referrals/:userId', async (req, res) => {
   res.json({ referrals, totalReferralEarnings: user.referralEarnings || 0 });
 });
 
-app.get('/start/:referralCode', async (req, res) => {
-  console.log('Received /start request - params:', req.params, 'query:', req.query); // Добавлена отладка
-  const referralCode = req.params.referralCode;
+app.get('/referral/:refCode', async (req, res) => {
+  console.log('Received referral request - params:', req.params, 'query:', req.query);
+  const refCode = req.params.refCode;
   const userId = req.query.userId;
   const username = req.query.username || 'Anonymous';
-  if (!userId) return res.status(400).json({ error: 'userId is required' });
-  const result = await processReferral(userId, username, referralCode);
+  if (!userId || !refCode.startsWith('ref_')) {
+    return res.status(400).json({ error: 'Invalid referral code or userId' });
+  }
+  const result = await processReferral(userId, username, refCode);
   if (result.success) {
     res.json({ userId, message: result.message });
   } else {
