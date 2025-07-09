@@ -7,7 +7,7 @@ const app = express();
 const TELEGRAM_BOT_TOKEN = '7784941820:AAEGj1qqZsBaj-G9g3qVsAm7XcSRraJ-y8o';
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 const CHAT_ID = '@AFK_Co1n';
-const PORT = process.env.PORT || 10000; // Убедимся, что порт совпадает с Render
+const PORT = process.env.PORT || 10000;
 const DATA_FILE = 'users.json';
 
 app.use(express.json());
@@ -85,18 +85,25 @@ async function updatePoints() {
 bot.start(async (ctx) => {
   const userId = ctx.from.id.toString();
   const username = ctx.from.username || 'Anonymous';
-  const referralCode = ctx.startParam || ''; // Используем startParam из webhook
+  let referralCode = ctx.startParam || ''; // Для webhook
+
+  // Извлечение реферала из текста сообщения (для /start 1047211768)
+  if (!referralCode && ctx.message.text.includes('/start ')) {
+    referralCode = ctx.message.text.split(' ')[1];
+  }
 
   const data = await readData();
+  console.log(`Processing /start for userId: ${userId}, referralCode: ${referralCode}`);
   if (!data.users[userId]) {
     data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0, isTelegramUser: false };
     if (referralCode && data.users[referralCode]) {
       data.users[referralCode].referrals.push(userId);
       data.users[userId].referredBy = referralCode;
+      console.log(`Referral activated: ${userId} referred by ${referralCode}`);
     }
     await writeData(data);
   }
-  await ctx.reply('Добро пожаловать! Используйте мини-приложение для заработка.'); // Подтверждение запуска
+  await ctx.reply('Добро пожаловать! Используйте мини-приложение для заработка.');
 });
 
 // Проверка подписки
@@ -166,14 +173,19 @@ app.get('/referrals/:userId', async (req, res) => {
 
 app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
-  const userId = req.query.userId || Date.now().toString();
+  const userId = req.query.userId; // Требуем userId, иначе ошибка
   const username = req.query.username || 'Anonymous';
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
   const data = await readData();
+  console.log(`Processing /start/${referralCode} for userId: ${userId}, username: ${username}`);
   if (!data.users[userId]) {
     data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0, isTelegramUser: false };
     if (referralCode && data.users[referralCode]) {
       data.users[referralCode].referrals.push(userId);
       data.users[userId].referredBy = referralCode;
+      console.log(`Referral activated via link: ${userId} referred by ${referralCode}`);
     }
     await writeData(data);
   }
@@ -192,11 +204,11 @@ app.post('/check-subscription', async (req, res) => {
 });
 
 // Настройка webhook
-const WEBHOOK_URL = 'https://telegram-bot-server-ixsp.onrender.com'; // Убедись, что URL верный
+const WEBHOOK_URL = 'https://telegram-bot-server-ixsp.onrender.com';
 app.use(bot.webhookCallback('/webhook'));
 bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
 
-setInterval(updatePoints, 10000); // 10 секунд
+setInterval(updatePoints, 10000);
 
 // Запуск сервера
 app.listen(PORT, () => {
@@ -204,6 +216,5 @@ app.listen(PORT, () => {
   initializeData().catch(console.error);
 });
 
-// Остановка бота
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
