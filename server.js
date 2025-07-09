@@ -12,7 +12,7 @@ const DATA_FILE = 'users.json';
 
 app.use(express.json());
 
-// CORS для всех запросов
+// CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -20,7 +20,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Инициализация или проверка файла данных
+// Инициализация данных
 async function initializeData() {
   try {
     await fs.access(DATA_FILE);
@@ -47,11 +47,10 @@ async function writeData(data) {
   }
 }
 
-// Обновление баллов и рефералов каждые 10 секунд
+// Обновление баллов
 async function updatePoints() {
   const data = await readData();
   const now = Date.now();
-
   for (const userId in data.users) {
     const user = data.users[userId];
     const timeDiff = (now - (user.lastUpdate || now)) / 1000;
@@ -59,13 +58,11 @@ async function updatePoints() {
     if (intervals > 0 && user.isTelegramUser) {
       user.points = (user.points || 0) + (intervals * 0.001);
       user.lastUpdate = now - ((timeDiff % 10) * 1000);
-
       if (user.referrals) {
         for (const referralId of user.referrals) {
-          if (data.users[referralId] && data.users[referralId].isTelegramUser) {
+          if (data.users[referralId]?.isTelegramUser) {
             const referral = data.users[referralId];
-            const referralNewIncome = (referral.points || 0) - (referral.lastPoints || 0);
-            const referralEarnings = referralNewIncome * 0.001;
+            const referralEarnings = ((referral.points || 0) - (referral.lastPoints || 0)) * 0.001;
             if (referralEarnings > 0) {
               user.points += referralEarnings;
               user.referralEarnings = (user.referralEarnings || 0) + referralEarnings;
@@ -77,33 +74,48 @@ async function updatePoints() {
       user.lastPoints = user.points;
     }
   }
-
   await writeData(data);
+}
+
+// Обработка рефералов
+async function processReferral(userId, username, referralCode = '') {
+  const data = await readData();
+  console.log(`Processing referral for userId: ${userId}, referralCode: ${referralCode}`);
+  if (!data.users[userId]) {
+    data.users[userId] = {
+      telegramId: userId,
+      username,
+      points: 0,
+      lastUpdate: Date.now(),
+      referrals: [],
+      referralEarnings: 0,
+      isTelegramUser: false,
+      referredBy: referralCode || null
+    };
+    if (referralCode && data.users[referralCode]) {
+      data.users[referralCode].referrals.push(userId);
+      console.log(`Referral activated: ${userId} referred by ${referralCode}`);
+    }
+    await writeData(data);
+    return { success: true, message: 'User registered' };
+  }
+  if (referralCode && !data.users[userId].referredBy && data.users[referralCode]) {
+    data.users[referralCode].referrals.push(userId);
+    data.users[userId].referredBy = referralCode;
+    await writeData(data);
+    console.log(`Referral linked: ${userId} referred by ${referralCode}`);
+    return { success: true, message: 'Referral activated' };
+  }
+  return { success: false, message: 'User already registered' };
 }
 
 // Команда /start
 bot.start(async (ctx) => {
   const userId = ctx.from.id.toString();
   const username = ctx.from.username || 'Anonymous';
-  let referralCode = ctx.startParam || ''; // Для webhook
-
-  // Извлечение реферала из текста сообщения (для /start 1047211768)
-  if (!referralCode && ctx.message.text.includes('/start ')) {
-    referralCode = ctx.message.text.split(' ')[1];
-  }
-
-  const data = await readData();
-  console.log(`Processing /start for userId: ${userId}, referralCode: ${referralCode}`);
-  if (!data.users[userId]) {
-    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0, isTelegramUser: false };
-    if (referralCode && data.users[referralCode]) {
-      data.users[referralCode].referrals.push(userId);
-      data.users[userId].referredBy = referralCode;
-      console.log(`Referral activated: ${userId} referred by ${referralCode}`);
-    }
-    await writeData(data);
-  }
-  await ctx.reply('Добро пожаловать! Используйте мини-приложение для заработка.');
+  const referralCode = ctx.startParam || (ctx.message.text.includes('/start ') ? ctx.message.text.split(' ')[1] : '');
+  const result = await processReferral(userId, username, referralCode);
+  await ctx.reply(result.message || 'Добро пожаловать! Используйте мини-приложение.');
 });
 
 // Проверка подписки
@@ -111,10 +123,9 @@ async function checkSubscription(userId) {
   console.log(`Checking subscription for userId: ${userId}`);
   try {
     const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChatMember`, {
-      params: { chat_id: CHAT_ID, user_id: userId },
+      params: { chat_id: CHAT_ID, user_id: userId }
     });
     const data = response.data;
-    console.log('Telegram API response:', data);
     if (data.ok && ['member', 'administrator', 'creator'].includes(data.result.status)) {
       const userData = await readData();
       if (userData.users[userId] && !userData.users[userId].isTelegramUser) {
@@ -125,7 +136,7 @@ async function checkSubscription(userId) {
     }
     return false;
   } catch (error) {
-    console.error('Subscription check error:', error.message, error.response?.data);
+    console.error('Subscription check error:', error.message);
     return false;
   }
 }
@@ -133,13 +144,13 @@ async function checkSubscription(userId) {
 // Эндпоинты API
 app.get('/user/:userId', async (req, res) => {
   const userId = req.params.userId;
+  const username = req.query.username || 'Anonymous';
   const data = await readData();
   if (!data.users[userId]) {
-    data.users[userId] = { telegramId: userId, username: req.query.username || 'Anonymous', points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0, isTelegramUser: false };
-    await writeData(data);
+    await processReferral(userId, username);
   }
   if (!data.users[userId].isTelegramUser) {
-    return res.status(403).json({ error: 'Access denied. Use Telegram Mini App to earn points.' });
+    return res.status(403).json({ error: 'Access denied. Subscribe to earn points.' });
   }
   res.json(data.users[userId]);
 });
@@ -159,58 +170,43 @@ app.get('/referrals/:userId', async (req, res) => {
   const data = await readData();
   const user = data.users[userId] || { referrals: [], referralEarnings: 0 };
   if (!user.isTelegramUser) {
-    return res.status(403).json({ error: 'Access denied. Use Telegram Mini App to earn points.' });
+    return res.status(403).json({ error: 'Access denied. Subscribe to earn points.' });
   }
-  const referrals = await Promise.all(
-    user.referrals.map(async (referralId) => {
-      const referral = data.users[referralId] || { points: 0, username: 'Unknown' };
-      const referralEarnings = ((referral.points || 0) - (referral.lastPoints || 0)) * 0.001;
-      return { referralId, username: referral.username, points: referral.points, expectations: referralEarnings };
-    })
-  );
+  const referrals = user.referrals.map(referralId => {
+    const referral = data.users[referralId] || { points: 0, username: 'Unknown' };
+    const referralEarnings = ((referral.points || 0) - (referral.lastPoints || 0)) * 0.001;
+    return { referralId, username: referral.username, points: referral.points, earnings: referralEarnings };
+  });
   res.json({ referrals, totalReferralEarnings: user.referralEarnings || 0 });
 });
 
 app.get('/start/:referralCode', async (req, res) => {
   const referralCode = req.params.referralCode;
-  const userId = req.query.userId; // Требуем userId, иначе ошибка
+  const userId = req.query.userId;
   const username = req.query.username || 'Anonymous';
-  if (!userId) {
-    return res.status(400).json({ error: 'userId is required' });
+  if (!userId) return res.status(400).json({ error: 'userId is required' });
+  const result = await processReferral(userId, username, referralCode);
+  if (result.success) {
+    res.json({ userId, message: result.message });
+  } else {
+    res.status(400).json({ error: result.message });
   }
-  const data = await readData();
-  console.log(`Processing /start/${referralCode} for userId: ${userId}, username: ${username}`);
-  if (!data.users[userId]) {
-    data.users[userId] = { telegramId: userId, username, points: 0, lastUpdate: Date.now(), referrals: [], referralEarnings: 0, isTelegramUser: false };
-    if (referralCode && data.users[referralCode]) {
-      data.users[referralCode].referrals.push(userId);
-      data.users[userId].referredBy = referralCode;
-      console.log(`Referral activated via link: ${userId} referred by ${referralCode}`);
-    }
-    await writeData(data);
-  }
-  if (!data.users[userId].isTelegramUser) {
-    return res.status(403).json({ error: 'Access denied. Use Telegram Mini App to earn points.' });
-  }
-  res.json({ userId, message: 'Referral activated' });
 });
 
 app.post('/check-subscription', async (req, res) => {
   const { userId } = req.body;
-  console.log(`Received check-subscription request:`, req.body);
   if (!userId) return res.status(400).json({ error: 'userId is required' });
   const subscribed = await checkSubscription(userId);
   res.json({ subscribed });
 });
 
-// Настройка webhook
+// Webhook и запуск
 const WEBHOOK_URL = 'https://telegram-bot-server-ixsp.onrender.com';
 app.use(bot.webhookCallback('/webhook'));
 bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
 
 setInterval(updatePoints, 10000);
 
-// Запуск сервера
 app.listen(PORT, () => {
   console.log(`Server on port ${PORT}`);
   initializeData().catch(console.error);
