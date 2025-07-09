@@ -98,13 +98,15 @@ bot.start(async (ctx) => {
   }
 });
 
-// Проверка подписки и активация пользователя
+// Проверка подписки с отладкой
 async function checkSubscription(userId) {
+  console.log(`Checking subscription for userId: ${userId}`);
   try {
     const response = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChatMember`, {
       params: { chat_id: CHAT_ID, user_id: userId },
     });
     const data = response.data;
+    console.log('Telegram API response:', data);
     if (data.ok && ['member', 'administrator', 'creator'].includes(data.result.status)) {
       const userData = await readData();
       if (userData.users[userId] && !userData.users[userId].isTelegramUser) {
@@ -115,7 +117,7 @@ async function checkSubscription(userId) {
     }
     return false;
   } catch (error) {
-    console.error('Subscription check error:', error.message);
+    console.error('Subscription check error:', error.message, error.response?.data);
     return false;
   }
 }
@@ -182,6 +184,7 @@ app.get('/start/:referralCode', async (req, res) => {
 
 app.post('/check-subscription', async (req, res) => {
   const { userId } = req.body;
+  console.log(`Received check-subscription request:`, req.body);
   if (!userId) return res.status(400).json({ error: 'userId is required' });
   const subscribed = await checkSubscription(userId);
   res.json({ subscribed });
