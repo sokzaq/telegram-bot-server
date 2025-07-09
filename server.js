@@ -81,6 +81,9 @@ async function updatePoints() {
 async function processReferral(userId, username, referralCode = '') {
   const data = await readData();
   console.log(`Processing referral for userId: ${userId}, referralCode: ${referralCode}`);
+  const referrerId = referralCode.startsWith('ref_') ? referralCode.replace('ref_', '') : referralCode;
+  const referrerExists = data.users[referrerId] ? true : false;
+
   if (!data.users[userId]) {
     data.users[userId] = {
       telegramId: userId,
@@ -90,27 +93,27 @@ async function processReferral(userId, username, referralCode = '') {
       referrals: [],
       referralEarnings: 0,
       isTelegramUser: false,
-      referredBy: referralCode ? referralCode.replace('ref_', '') : null
+      referredBy: referrerExists ? referrerId : null
     };
-    if (referralCode && data.users[referralCode.replace('ref_', '')]) {
-      if (!data.users[referralCode.replace('ref_', '')].referrals.includes(userId)) {
-        data.users[referralCode.replace('ref_', '')].referrals.push(userId);
-        console.log(`Referral activated: ${userId} referred by ${referralCode.replace('ref_', '')}`);
+    if (referrerExists) {
+      if (!data.users[referrerId].referrals.includes(userId)) {
+        data.users[referrerId].referrals.push(userId);
+        console.log(`Referral activated: ${userId} referred by ${referrerId}`);
       }
     }
     await writeData(data);
     return { success: true, message: 'User registered' };
   }
-  if (referralCode && !data.users[userId].referredBy && data.users[referralCode.replace('ref_', '')]) {
-    if (!data.users[referralCode.replace('ref_', '')].referrals.includes(userId)) {
-      data.users[referralCode.replace('ref_', '')].referrals.push(userId);
-      data.users[userId].referredBy = referralCode.replace('ref_', '');
+  if (referralCode && !data.users[userId].referredBy && referrerExists) {
+    if (!data.users[referrerId].referrals.includes(userId)) {
+      data.users[referrerId].referrals.push(userId);
+      data.users[userId].referredBy = referrerId;
       await writeData(data);
-      console.log(`Referral linked: ${userId} referred by ${referralCode.replace('ref_', '')}`);
+      console.log(`Referral linked: ${userId} referred by ${referrerId}`);
       return { success: true, message: 'Referral activated' };
     }
   }
-  return { success: false, message: 'User already registered' };
+  return { success: false, message: 'User already registered or invalid referral code' };
 }
 
 // Команда /start
@@ -211,7 +214,7 @@ app.post('/check-subscription', async (req, res) => {
 // Webhook и запуск
 const WEBHOOK_URL = 'https://telegram-bot-server-ixsp.onrender.com';
 app.use(bot.webhookCallback('/webhook'));
-bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
+bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`).catch(console.error);
 
 setInterval(updatePoints, 10000);
 
