@@ -93,20 +93,24 @@ async function processReferral(userId, username, referralCode = '') {
       referredBy: referralCode || null
     };
     if (referralCode && data.users[referralCode]) {
-      data.users[referralCode].referrals.push(userId);
-      console.log(`Referral activated: ${userId} referred by ${referralCode}`);
+      if (!data.users[referralCode].referrals.includes(userId)) {
+        data.users[referralCode].referrals.push(userId);
+        console.log(`Referral activated: ${userId} referred by ${referralCode}`);
+      }
     }
     await writeData(data);
-    return { success: true, message: 'User registered' };
+    return { success: true, message: 'User registered', user: data.users[userId] };
   }
   if (referralCode && !data.users[userId].referredBy && data.users[referralCode]) {
-    data.users[referralCode].referrals.push(userId);
-    data.users[userId].referredBy = referralCode;
-    await writeData(data);
-    console.log(`Referral linked: ${userId} referred by ${referralCode}`);
-    return { success: true, message: 'Referral activated' };
+    if (!data.users[referralCode].referrals.includes(userId)) {
+      data.users[referralCode].referrals.push(userId);
+      data.users[userId].referredBy = referralCode;
+      await writeData(data);
+      console.log(`Referral linked: ${userId} referred by ${referralCode}`);
+      return { success: true, message: 'Referral activated', user: data.users[userId] };
+    }
   }
-  return { success: false, message: 'User already registered' };
+  return { success: false, message: 'User already registered', user: data.users[userId] || {} };
 }
 
 // Команда /start
@@ -147,12 +151,16 @@ app.get('/user/:userId', async (req, res) => {
   const username = req.query.username || 'Anonymous';
   const data = await readData();
   if (!data.users[userId]) {
-    await processReferral(userId, username);
+    const result = await processReferral(userId, username);
+    if (!result.user) {
+      return res.status(500).json({ error: 'Failed to register user' });
+    }
   }
-  if (!data.users[userId].isTelegramUser) {
+  const user = data.users[userId] || {};
+  if (!user.isTelegramUser) {
     return res.status(403).json({ error: 'Access denied. Subscribe to earn points.' });
   }
-  res.json(data.users[userId]);
+  res.json(user);
 });
 
 app.get('/leaderboard', async (req, res) => {
