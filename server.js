@@ -83,8 +83,7 @@ async function updatePoints() {
 // Обработка рефералов
 async function processReferral(userId, username, referralCode = '') {
   const data = await readData();
-  console.log(`Обработка реферала: userId=${userId}, referralCode=${referralCode}`);
-
+  console.log(`Обработка реферала: userId=${userId}, referralCode=${referralCode}, existingUser=${!!data.users[userId]}`);
   if (!data.users[userId]) {
     data.users[userId] = {
       telegramId: userId,
@@ -105,8 +104,8 @@ async function processReferral(userId, username, referralCode = '') {
   } else if (referralCode && !data.users[userId].referredBy && data.users[referralCode] && referralCode !== userId) {
     data.users[userId].referredBy = referralCode;
     data.users[referralCode].referrals.push(userId);
-    await writeData(data);
     console.log(`Реферал привязан: ${userId} к ${referralCode}`);
+    await writeData(data);
     return { success: true, message: 'Реферал активирован' };
   }
   return { success: false, message: 'Пользователь уже зарегистрирован или реферал недействителен' };
@@ -174,13 +173,12 @@ app.get('/referrals/:userId', async (req, res) => {
   res.json({ referrals, totalReferralEarnings: user.referralEarnings || 0 });
 });
 
-app.post('/start/:referralCode', async (req, res) => {
-  const referralCode = req.params.referralCode;
-  const { userId, username } = req.body;
-  console.log('Получен запрос на активацию реферала:', { referralCode, userId, username });
+app.post('/start', async (req, res) => { // Изменяем маршрут на /start
+  const { userId, username, referralCode } = req.body;
+  console.log('Получен запрос на активацию реферала:', { userId, username, referralCode });
 
-  if (!userId || !username) {
-    return res.status(400).json({ error: 'Требуются userId и username' });
+  if (!userId || !username || !referralCode) {
+    return res.status(400).json({ error: 'Требуются userId, username и referralCode' });
   }
 
   const result = await processReferral(userId, username, referralCode);
